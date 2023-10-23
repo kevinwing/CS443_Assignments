@@ -1,131 +1,161 @@
 /**
  * @file main.cpp
  * @author Kevin Wing (wing5640@vandals.uidaho.edu)
- * @brief Switch Debouncing and Time Division Multiplexing (TDM) on a Vanduino Shield and Arduino Uno board.
- *
- * Requirements:
- *
- * This assignment is designed to demonstrate the concepts of switch debouncing and time division multiplexing (TDM) on a
- * Vanduino Shield and Arduino Uno board.
- *
- *     Write an Arduino sketch that counts the button presses of SW2 and SW3 on the Vanduino shield.
- *         The 7-segment display should initially display the count "00".
- *         Each time SW3 is pressed, the 7-seg display should increment the count shown.
- *         Each time SW2 is pressed, the 7-seg display should decrement the count shown.
- *         The displayed count should “roll over” to 00 after it reaches a maximum count of 99.
- *         Submit your .cpp file, with appropriate comments, and a short video
- *         showing the program features. You may alternatively demonstrate your program to me in
- *         person (or over video link from Moscow) on or before the due date.
- *
- * Rules, hints, and comments
- *
- * You may not use any of the built-in Arduino functions, other than micros(). Access all registers directly (e.g. via PORTx,
- * PINx, DDRx, etc.) and use appropriate bitmasking operations to control individual bits.
- *
- * Each switch press should change the count displayed by exactly +/- 1. I.e., the switch should not bounce. Also, the
- * response to a switch press should be "snappy" -- there should be no noticeable lag between the time a switch is pressed and
- * the display updates.
- * Your program will need to implement a switch debouncing algorithm, which must be tuned to provide the reliable, but
- * "snappy" response required. You may want to refer to the “Debouncing Guide” link on Canvas for example
- * code and algorithms.
- * Your program will need to implement Time Division Multiplexing (TDM) in order to display 2-digit numbers on the 7-
- * Segment Display. The numbers displayed should be decimal (not hex).
- * Your program should have a constant defined which controls the TDM rate. Experiment with different values for this
- * constant and answer the following question as a comment in your code:
- * What is the minimum frequency that the 7-seg display can be muxed and not appear to be flickering?
- *
- * As in prior homework projects, PORTB[2:3] must be programmed as inputs to protect the processor from
- * short-circuits caused by switch presses. However, to control the 7-Segment Cathodes from Port B outputs via TDM
- * safely, you must do the following:
- * In setup(), clear PORTB[0:1] and never set these bits afterwards.
- * In loop(), set DDRB[0] or DDRB[1] to turn on a given digit; clear DDRB[0] or DDRB[1] to turn off a given digit.
- *
- *
- * To prevent "ghosting", only light and unlight segments at times when both cathodes are off. And, be sure that there is never
- * any overlap time when both cathodes are on.
- *
- * You may find the Arduino Examples>Digital>Debounce sketch
- * Links to an external site. a useful starting point for switch debouncing. But, other
- * algorithms are available on the Resources link mentioned above.
- * Use “good” programming style with descriptive headers and useful comments.
- * I recommend calling functions that multiplex the display and debounce the switches periodically inside loop() at appropriate
- * intervals determined by global constants and the micros() function.
- * @date 2023-10-09
+ * @brief A program to count the button presses of SW2 and SW3 on the Vanduino shield and display the count on the 7-segment display.
+ * @date 2023-10-22
  */
 #include <Arduino.h>
-// #include "switch.hpp"
 
 // type aliases
-using TickType = unsigned long; // type alias for unsigned long
+using TickType = unsigned long;
 
-// global constants
-const TickType TickLength = 1000;     // 1 ms
-const TickType DebounceDelay = 50000; // 50 ms
+// enum SwitchState
+enum SwitchState
+{
+    NONE_PRESSED,
+    INCREMENT_PRESSED,
+    DECREMENT_PRESSED,
+};
 
-// global variables
-// bool incrementSwitchPressed = false; // flag for increment switch
-// bool decrementSwitchPressed = false; // flag for decrement switch
-// uint8_t currentPin = 0;
-// bool SwitchState;
-byte LastSwitchState = 1;
-bool ButtonPressed = false;
-TickType count = 0; // count of button presses
-TickType lastDebounceTime = 0;
+// Define pins and constants
+const byte buttonIncrementPin = 3;    // PORTB[3]
+const byte buttonDecrementPin = 2;    // PORTB[2]
+const TickType debounceDelay = 50000; // the debounce time
+const byte displayOnesPin = 0;    // DDRB[0]
+const byte displayTensPin = 1;    // DDRB[1]
+const TickType TickDelay = 15000; // 1/1000 second
+
+// TODO: refactor to remove global variables
+// Global variables
+volatile byte LastIncrementButtonState = HIGH; // the previous reading from the input pin
+volatile byte LastDecrementButtonState = HIGH; // the previous reading from the input pin
+volatile byte IncrementButtonState = HIGH; // the current reading from the input pin
+volatile byte DecrementButtonState = HIGH; // the current reading from the input pin
+volatile TickType LastIncrementDebounceTime = 0; // the last time the output pin was toggled
+volatile TickType LastDecrementDebounceTime = 0; // the last time the output pin was toggled
+volatile long count = 0; // count of button presses
 
 // function prototypes
-void delayMicros(TickType delay);
-bool debounceSwitch(uint8_t pin);
-void displayDigit(uint8_t digit, uint8_t upPin, uint8_t downPin);
+SwitchState debounceButton();
+void delayMicros(TickType durationMicros);
+void displayDigit(byte digit, byte upPin, byte downPin);
 
 void setup()
 {
-    // ensure 7-segment display is off
-    DDRB &= ~(1 << 0); // clear DDRB[0]
-    DDRB &= ~(1 << 1); // clear DDRB[1]
+    // clear PORTB[0:1]
+    PORTB &= ~((1 << displayOnesPin) | (1 << displayTensPin));
 
-    // clear PORTB[0:1] and never set these bits afterwards.
-    PORTB &= ~(1 << 0); // clear PORTB[0]
-    PORTB &= ~(1 << 1); // clear PORTB[1]
+    // set PORTB[2:3] as input
+    DDRB &= ~((1 << buttonIncrementPin) | (1 << buttonDecrementPin));
 
-    // set PORTB[2:3] as input for switches
-    PORTB |= (1 << 2);  // set PORTB[2] as input
-    PORTB |= (1 << 3);  // set PORTB[3] as input
-
-    DDRD = 0b11111111; // set PORTD[0:7] as output for 7-segment display
-
-    Serial.begin(9600);
+    // set PORTD as output
+    DDRD = 0b11111111;
 }
 
 void loop()
 {
-    // debounce increment switch and increment when debounced
-    if (debounceSwitch(2))
+    // monitor switches for button presses and increment or decrement count
+    SwitchState switchChoice = debounceButton();
+
+    // increment or decrement count based on state
+    switch (switchChoice)
     {
+    case INCREMENT_PRESSED:
         ++count;
-    }
-    else if (debounceSwitch(3))
-    {
+        break;
+
+    case DECREMENT_PRESSED:
         --count;
+        break;
+
+    case NONE_PRESSED: // intentional fallthrough
+    default:
+        break;
     }
 
-    // display digits
-    displayDigit(count / 10, 0, 1); // display tens digit
-    delayMicros(TickLength);        // delay 1 second
-    displayDigit(count % 10, 1, 0); // display ones digit
-    delayMicros(TickLength);        // delay 1 second
-}
-
-// custom delay function using micros()
-void delayMicros(TickType delay)
-{
-    volatile unsigned long start = micros();
-    while (micros() - start < delay)
+    // roll over count to 0 if count > 99
+    if (count > 99)
     {
+        count = 0;
+    }
+    else if (count < 0)
+    {
+        count = 99;
+    }
+
+    // time division multiplexing
+    // display tens digit
+    displayDigit(count / 10, displayTensPin, displayOnesPin);
+    delayMicros(TickDelay);
+    // display ones digit
+    displayDigit(count % 10, displayOnesPin, displayTensPin);
+    delayMicros(TickDelay);
+}
+
+// function to debounce button press and release events for a given pin saving the last state of each button
+SwitchState debounceButton()
+{
+    // read value of PORTB[2:3] into variable
+    byte incrementState = PINB & (1 << buttonIncrementPin);
+    byte decrementState = PINB & (1 << buttonDecrementPin);
+
+    // check if the state of the button has changed since last read
+    if (incrementState != LastIncrementButtonState)
+    {
+        LastIncrementDebounceTime = micros();
+    }
+
+    // check if the state of the button has changed since last read
+    if (decrementState != LastDecrementButtonState)
+    {
+        LastDecrementDebounceTime = micros();
+    }
+
+    // if the increment button state has been stable for longer than the debounce delay then return INCREMENT_PRESSED
+    if ((micros() - LastIncrementDebounceTime) > debounceDelay)
+    {
+        if (incrementState != IncrementButtonState)
+        {
+            IncrementButtonState = incrementState; // update last button state
+            if (IncrementButtonState == LOW)
+            {
+                return INCREMENT_PRESSED;
+            }
+        }
+    }
+
+    // if the decrement button state has been stable for longer than the debounce delay then return DECREMENT_PRESSED
+    if ((micros() - LastDecrementDebounceTime) > debounceDelay)
+    {
+        if (decrementState != DecrementButtonState)
+        {
+            DecrementButtonState = decrementState; // update last button state
+            if (DecrementButtonState == LOW)
+            {
+                return DECREMENT_PRESSED;
+            }
+        }
+    }
+
+    // update last button states
+    LastIncrementButtonState = incrementState;
+    LastDecrementButtonState = decrementState;
+
+    return NONE_PRESSED; // no button pressed
+}
+
+// function to delay for a specified number of microseconds
+void delayMicros(TickType durationMicros)
+{
+    volatile TickType start = micros();
+    while (micros() - start < durationMicros)
+    {
+        // do nothing
     }
 }
 
-// function to display digit on 7-segment display
-void displayDigit(uint8_t digit, uint8_t upPin, uint8_t downPin)
+// function to display a digit on the 7-segment display
+void displayDigit(byte digit, byte upPin, byte downPin)
 {
     // decimal font table
     static uint8_t fontTable[] = {
@@ -149,32 +179,4 @@ void displayDigit(uint8_t digit, uint8_t upPin, uint8_t downPin)
 
     // set upPin digit to digit for display
     PORTD = fontTable[digit];
-}
-
-// function to debounce switch using micros()
-bool debounceSwitch(uint8_t pin)
-{
-    // read state of pin into variable
-    byte currentSwitchState = (PINB & (1 << pin)) >> pin;
-
-    if (currentSwitchState != LastSwitchState)
-    {
-        lastDebounceTime = micros();
-    }
-
-    if ((micros() - lastDebounceTime) > DebounceDelay)
-    {
-        if (currentSwitchState == 0 && !ButtonPressed)
-        {
-            ButtonPressed = true;
-            LastSwitchState = currentSwitchState;
-            return true;
-        }
-        else if (currentSwitchState == 1)
-        {
-            ButtonPressed = false;
-            LastSwitchState = currentSwitchState;
-        }
-    }
-    return false;
 }
