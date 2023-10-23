@@ -3,6 +3,9 @@
  * @author Kevin Wing (wing5640@vandals.uidaho.edu)
  * @brief A program to count the button presses of SW2 and SW3 on the Vanduino shield and display the count on the 7-segment display.
  * @date 2023-10-22
+ * 
+ * What is the minimum frequency that the 7-seg display can be muxed and not appear to be flickering?
+ *     It seems to be around 1200 uS. At 1100 uS it is noticeable but not too bad.
  */
 #include <Arduino.h>
 
@@ -23,7 +26,7 @@ const byte buttonDecrementPin = 2;    // PORTB[2]
 const TickType debounceDelay = 50000; // the debounce time
 const byte displayOnesPin = 0;    // DDRB[0]
 const byte displayTensPin = 1;    // DDRB[1]
-const TickType TickDelay = 15000; // 1/1000 second
+const TickType TickDelay = 10000; // 1/1000 second
 
 // TODO: refactor to remove global variables
 // Global variables
