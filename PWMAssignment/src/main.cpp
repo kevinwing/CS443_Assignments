@@ -57,18 +57,21 @@
  *     LED 4 (Yellow): Port C, 3 (PC3)
  *
  *     RGB LED (Red=Reverse, Green=Forward): PORTD[2, 4, 7]
- *         Red: Port D, 2 (PD2)
- *         Green: Port D, 4 (PD4)
- *         Blue: Port D, 7 (PD7)
+ *         Red: Port D, 7 (PD7)
+ *         Blue: Port D, 4 (PD4)
+ *         Green: Port D, 2 (PD2)
  *
  *     H-Bridge (L293D):
  *         Enable 1,2: Port B, 3 (PB3) (PWM)
  *         Input 1: Port B, 0 (PB2)
  *         Input 2: Port B, 1 (PB1)
+ *         Output 1: Port D, 5 (PD
  */
-#include <Arduino.h>
+// #include <Arduino.h>
+#include "debouncer.hpp"
 
 // Types
+// using TickType = unsigned long;
 typedef enum MotorDirection_t
 {
     MOTOR_OFF,
@@ -78,7 +81,6 @@ typedef enum MotorDirection_t
 
 typedef enum MotorSpeed_t
 {
-    MOTOR_SPEED_OFF,
     MOTOR_SPEED_25,
     MOTOR_SPEED_50,
     MOTOR_SPEED_75,
@@ -91,38 +93,263 @@ typedef enum MotorEnabled_t
     MOTOR_ENABLED,
 } MotorEnabled_t;
 
+typedef enum SwitchState_t
+{
+    NONE_PRESSED,
+    SWITCH_1_PRESSED,
+    SWITCH_2_PRESSED,
+} SwitchState_t;
+
 // Constants
+#define SWITCH_1_PIN PC4
+#define SWITCH_2_PIN PC5
+#define RGB_RED_PIN PD7
+#define RGB_BLUE_PIN PD4
+#define RGB_GREEN_PIN PD2
+#define LED_1_PIN PC0
+#define LED_2_PIN PC1
+#define LED_3_PIN PC2
+#define LED_4_PIN PC3
+#define ENABLE_PIN PB3
+#define INPUT_1_PIN PB2
+#define INPUT_2_PIN PB1
+#define MAX_DUTY_CYCLE 255
+// const byte PORT_C_READ = PINC;
+// const byte PORT_D_READ = PIND;
+// const byte PORT_B_READ = PINB;
+
+// const TickType debounceDelay = 50000; // 50ms debounce delay
 
 // Variables
 MotorDirection_t motorDirection = MOTOR_OFF;
-MotorSpeed_t motorSpeed = MOTOR_SPEED_OFF;
+uint8_t RGBColor = RGB_GREEN_PIN;
+MotorDirection_t previousMotorDirection = MOTOR_OFF;
+
+MotorSpeed_t motorSpeed = MOTOR_SPEED_25;
 MotorEnabled_t motorEnabled = MOTOR_DISABLED;
+// MotorEnabled_t previousMotorEnabled = MOTOR_DISABLED;
+
+uint8_t dutyCycle = 0;
+uint8_t dutyCycleIndex = 0;
 
 // Function Prototypes
-bool isSwitch1Pressed();
-bool isSwitch2Pressed();
-MotorEnabled_t getMotorState();
-MotorDirection_t getMotorDirection();
-MotorSpeed_t getMotorSpeed();
+void pwm(uint8_t duty);
+void delayMicros(unsigned long delay);
+// bool debounce(uint8_t pByte, uint8_t pin);
+// SwitchState_t getKeyPress();
+void setMotorSpeed();
+void setMotorDirection();
+void setDutyCycle();
+bool debounceSwitchOne();
+bool debounceSwitchTwo();
+
+// Object Instantiations
+Debouncer switch1;
+Debouncer switch2;
 
 void setup()
 {
     // Set Switch 1, 2 as inputs
-    DDRC &= ~((1 << DDC4) | (1 << DDC5)); // 0b00010000 | 0b00001000 = 0b00011000
+    // DDRC &= ~((1 << SWITCH_1_PIN) | (1 << SWITCH_2_PIN)); // 0b00010000 | 0b00001000 = 0b00011000
+
+    switch1.begin(SWITCH_1_PIN);
+    switch2.begin(SWITCH_2_PIN);
 
     // Set LED 1, 2, 3, 4 as outputs
-    DDRC |= (1 << DDC0) | (1 << DDC1) | (1 << DDC2) | (1 << DDC3); // 0b00000001 | 0b00000010 | 0b00000100 | 0b00001000 = 0b00001111
+    DDRC |= (1 << LED_1_PIN) | (1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN); // 0b00000001 | 0b00000010 | 0b00000100 | 0b00001000 = 0b00001111
 
     // Set RGB LED as outputs
-    DDRD |= (1 << DDD2) | (1 << DDD4) | (1 << DDD7); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100
+    DDRD |= (1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100
 
     // Set H-Bridge as outputs
-    DDRB |= (1 << DDB3) | (1 << DDB2) | (1 << DDB1); // 0b00001000 | 0b00000100 | 0b00000010 = 0b00001110
+    DDRB |= (1 << ENABLE_PIN) | (1 << INPUT_1_PIN) | (1 << INPUT_2_PIN); // 0b00001000 | 0b00000010 | 0b00000001 = 0b00001011
 
     // Set initial state of LED 1, 2, 3, 4 to off
-    PORTC &= ~((1 << PORTC0) | (1 << PORTC1) | (1 << PORTC2) | (1 << PORTC3)); // 0b00000001 | 0b00000010 | 0b00000100 | 0b00001000 = 0b00001111
+    PORTC &= ~((1 << LED_1_PIN) | (1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN)); // 0b00000001 | 0b00000010 | 0b00000100 | 0b00001000 = 0b00001111: ~0b00001111 = 0b11110000
+
+    // Set initial state of RGB LED to off
+    PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN)); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100: ~0b10010100 = 0b01101011
+
+    // set initial state of H-Bridge to off
+    PORTB &= ~((1 << ENABLE_PIN) | (1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00001000 | 0b00000010 | 0b00000001 = 0b00001011: ~0b00001011 = 0b11110100
+
+    // set initial state of LED 1 to on
+    PORTC |= (1 << LED_1_PIN); // 0b00000001 = 0b00000001
+
+    Serial.begin(9600);
 }
 
 void loop()
 {
+    // if (debounceSwitchOne())
+    if (switch1.debounce())
+    {
+        Serial.println("Switch 1 Pressed");
+        // motor direction: forward -> off -> reverse -> off -> forward -> off
+        setMotorDirection();
+    }
+    
+    // if (debounceSwitchTwo())
+    if (switch2.debounce())
+    {
+        Serial.println("Switch 2 Pressed");
+        // motor speed: 25% -> 50% -> 75% -> 100%
+        setMotorSpeed();
+    }
+    
+    // PWM implementation to control motor speed without using analogWrite() or pwm()
+    if (motorEnabled == MOTOR_ENABLED)
+    {
+        pwm(dutyCycle);
+    }
+    else
+    {
+        pwm(0);
+    }
+    
+}
+
+// delay function using micros()
+void delayMicros(unsigned long delay)
+{
+    volatile unsigned long start = micros();
+    while (micros() - start < delay)
+    {
+        // do nothing
+    }
+}
+
+void enableMotor()
+{
+    // set enable pin to high
+    PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
+}
+
+// function for motor control using L293D H-Bridge and PWM to run motor with 4mS frame time
+void pwm(uint8_t duty)
+{
+    // set enable pin to high
+    PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
+
+    // set input pins to high
+
+    // delay for duty cycle
+    delayMicros(duty);
+
+    // set input pins to low
+    PORTB &= ~((1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00000010 | 0b00000001 = 0b00000011: ~0b00000011 = 0b11111100
+
+    // delay for remaining frame time
+    delayMicros(4000 - duty);
+}
+
+void setMotorSpeed()
+{
+    switch (motorSpeed)
+    {
+    case MOTOR_SPEED_25:
+        motorSpeed = MOTOR_SPEED_50;
+        // set LED 1,2 on and 3,4 off
+        PORTC |= (1 << LED_1_PIN) | (1 << LED_2_PIN);
+        PORTC &= ~((1 << LED_3_PIN) | (1 << LED_4_PIN));
+        break;
+
+    case MOTOR_SPEED_50:
+        motorSpeed = MOTOR_SPEED_75;
+        // set LED 1, 2, 3 on and 4 off
+        PORTC |= (1 << LED_1_PIN) | (1 << LED_2_PIN) | (1 << LED_3_PIN);
+        PORTC &= ~(1 << LED_4_PIN);
+        break;
+
+    case MOTOR_SPEED_75:
+        motorSpeed = MOTOR_SPEED_100;
+        // set LED 1, 2, 3, 4 on
+        PORTC |= (1 << LED_1_PIN) | (1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN);
+        break;
+
+    case MOTOR_SPEED_100:
+        motorSpeed = MOTOR_SPEED_25;
+        // set LED 1 on and 2, 3, 4 off
+        PORTC |= (1 << LED_1_PIN);
+        PORTC &= ~((1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN));
+        break;
+    
+    default:
+        break;
+    }
+
+    Serial.print("Motor Speed: ");
+    Serial.println(motorSpeed);
+
+    setDutyCycle();
+}
+
+void setMotorDirection()
+{
+    switch (motorDirection)
+    {
+    case MOTOR_OFF:
+        if (previousMotorDirection == MOTOR_FORWARD)
+        {
+            motorDirection = MOTOR_REVERSE;
+            // set pins to reverse
+            PORTD |= (1 << RGB_RED_PIN);
+            PORTD &= ~((1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN));
+            PORTB |= (1 << INPUT_2_PIN);
+            PORTB &= ~(1 << INPUT_1_PIN);
+        }
+        else
+        {
+            motorDirection = MOTOR_FORWARD;
+            // set pins to forward
+            PORTD |= (1 << RGB_GREEN_PIN);
+            PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_BLUE_PIN));
+            PORTB |= (1 << INPUT_1_PIN);
+            PORTB &= ~(1 << INPUT_2_PIN);
+        }
+        previousMotorDirection = motorDirection;
+        break;
+
+    case MOTOR_FORWARD:
+    case MOTOR_REVERSE:
+        previousMotorDirection = motorDirection;
+        motorDirection = MOTOR_OFF;
+        // set RGB off
+        PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN));
+        break;
+    
+    default:
+        break;
+    }
+
+    Serial.print("Motor Direction: ");
+    Serial.println(motorDirection);
+}
+
+void setDutyCycle()
+{
+    switch (motorSpeed)
+    {
+    case MOTOR_SPEED_25:
+        dutyCycle = MAX_DUTY_CYCLE * 0.25;
+        break;
+    
+    case MOTOR_SPEED_50:
+        dutyCycle = MAX_DUTY_CYCLE * 0.50;
+        break;
+
+    case MOTOR_SPEED_75:
+        dutyCycle = MAX_DUTY_CYCLE * 0.75;
+        break;
+    
+    case MOTOR_SPEED_100:
+        dutyCycle = MAX_DUTY_CYCLE;
+        break;
+    
+    default:
+        break;
+    }
+
+    Serial.print("Duty Cycle: ");
+    Serial.println(dutyCycle);
 }
