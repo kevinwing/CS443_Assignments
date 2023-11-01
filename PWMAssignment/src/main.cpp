@@ -170,8 +170,11 @@ void setup()
     // Set initial state of RGB LED to off
     PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN)); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100: ~0b10010100 = 0b01101011
 
-    // set initial state of H-Bridge to off
-    PORTB &= ~((1 << ENABLE_PIN) | (1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00001000 | 0b00000010 | 0b00000001 = 0b00001011: ~0b00001011 = 0b11110100
+    // set initial state of motor to off
+    PORTB &= ~(1 << ENABLE_PIN);
+
+    // set initial motor direction to off
+    PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN)); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100: ~0b10010100 = 0b01101011
 
     // set initial state of LED 1 to on
     PORTC |= (1 << LED_1_PIN); // 0b00000001 = 0b00000001
@@ -188,7 +191,7 @@ void loop()
         // motor direction: forward -> off -> reverse -> off -> forward -> off
         setMotorDirection();
     }
-    
+
     // if (debounceSwitchTwo())
     if (switch2.debounce())
     {
@@ -196,17 +199,23 @@ void loop()
         // motor speed: 25% -> 50% -> 75% -> 100%
         setMotorSpeed();
     }
-    
-    // PWM implementation to control motor speed without using analogWrite() or pwm()
-    if (motorEnabled == MOTOR_ENABLED)
+
+    switch (motorDirection)
     {
-        pwm(dutyCycle);
+    case MOTOR_FORWARD: // intentional fall-through
+    case MOTOR_REVERSE:
+        PORTB |= (1 << ENABLE_PIN);
+        delayMicros(dutyCycle);
+        PORTB &= ~(1 << ENABLE_PIN);
+        delayMicros(4000 - dutyCycle);
+        break;
+    case MOTOR_OFF:
+        PORTB &= ~(1 << ENABLE_PIN);
+        delayMicros(4000);
+        break;
+    default:
+        break;
     }
-    else
-    {
-        pwm(0);
-    }
-    
 }
 
 // delay function using micros()
@@ -219,29 +228,29 @@ void delayMicros(unsigned long delay)
     }
 }
 
-void enableMotor()
-{
-    // set enable pin to high
-    PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
-}
+// void enableMotor()
+// {
+//     // set enable pin to high
+//     PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
+// }
 
 // function for motor control using L293D H-Bridge and PWM to run motor with 4mS frame time
-void pwm(uint8_t duty)
-{
-    // set enable pin to high
-    PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
+// void pwm(uint8_t duty)
+// {
+//     // set enable pin to high
+//     PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
 
-    // set input pins to high
+//     // set input pins to high
 
-    // delay for duty cycle
-    delayMicros(duty);
+//     // delay for duty cycle
+//     delayMicros(duty);
 
-    // set input pins to low
-    PORTB &= ~((1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00000010 | 0b00000001 = 0b00000011: ~0b00000011 = 0b11111100
+//     // set input pins to low
+//     PORTB &= ~((1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00000010 | 0b00000001 = 0b00000011: ~0b00000011 = 0b11111100
 
-    // delay for remaining frame time
-    delayMicros(4000 - duty);
-}
+//     // delay for remaining frame time
+//     delayMicros(4000 - duty);
+// }
 
 void setMotorSpeed()
 {
@@ -273,7 +282,7 @@ void setMotorSpeed()
         PORTC |= (1 << LED_1_PIN);
         PORTC &= ~((1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN));
         break;
-    
+
     default:
         break;
     }
@@ -317,7 +326,7 @@ void setMotorDirection()
         // set RGB off
         PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN));
         break;
-    
+
     default:
         break;
     }
@@ -333,7 +342,7 @@ void setDutyCycle()
     case MOTOR_SPEED_25:
         dutyCycle = MAX_DUTY_CYCLE * 0.25;
         break;
-    
+
     case MOTOR_SPEED_50:
         dutyCycle = MAX_DUTY_CYCLE * 0.50;
         break;
@@ -341,11 +350,11 @@ void setDutyCycle()
     case MOTOR_SPEED_75:
         dutyCycle = MAX_DUTY_CYCLE * 0.75;
         break;
-    
+
     case MOTOR_SPEED_100:
         dutyCycle = MAX_DUTY_CYCLE;
         break;
-    
+
     default:
         break;
     }
