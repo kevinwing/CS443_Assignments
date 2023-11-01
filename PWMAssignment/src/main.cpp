@@ -14,9 +14,8 @@
  *     controller. Each press should cycle through 25%-50%-75%-100% duty cycles then repeat.
  *     Construct a "bar graph" using a row of four yellow LEDs and appropriate current-limiting resistors that light up a line of
  *     LED's corresponding to the duty cycle selected.
- *     Submit your code file with appropriate comments and a short video showing the program features.
- *
- * Rules, hints, comments
+ *     Submit your code file wit                    
+
  *
  *     You may use the Arduino functions millis() and/or micros(), but you may not use any other functions including delay(),
  *     digitalRead(), digitalWrite(), and analogWrite().
@@ -71,7 +70,6 @@
 #include "debouncer.hpp"
 
 // Types
-// using TickType = unsigned long;
 typedef enum MotorDirection_t
 {
     MOTOR_OFF,
@@ -79,6 +77,10 @@ typedef enum MotorDirection_t
     MOTOR_REVERSE,
 } MotorDirection_t;
 
+/**
+ * @brief Motor speed settings
+ * 
+ */
 typedef enum MotorSpeed_t
 {
     MOTOR_SPEED_25,
@@ -87,12 +89,10 @@ typedef enum MotorSpeed_t
     MOTOR_SPEED_100,
 } MotorSpeed_t;
 
-typedef enum MotorEnabled_t
-{
-    MOTOR_DISABLED,
-    MOTOR_ENABLED,
-} MotorEnabled_t;
-
+/**
+ * @brief Switch states
+ * 
+ */
 typedef enum SwitchState_t
 {
     NONE_PRESSED,
@@ -114,46 +114,29 @@ typedef enum SwitchState_t
 #define INPUT_1_PIN PB2
 #define INPUT_2_PIN PB1
 #define MAX_DUTY_CYCLE 255
-// const byte PORT_C_READ = PINC;
-// const byte PORT_D_READ = PIND;
-// const byte PORT_B_READ = PINB;
-
-// const TickType debounceDelay = 50000; // 50ms debounce delay
 
 // Variables
 MotorDirection_t motorDirection = MOTOR_OFF;
-uint8_t RGBColor = RGB_GREEN_PIN;
 MotorDirection_t previousMotorDirection = MOTOR_OFF;
-
 MotorSpeed_t motorSpeed = MOTOR_SPEED_25;
-MotorEnabled_t motorEnabled = MOTOR_DISABLED;
-// MotorEnabled_t previousMotorEnabled = MOTOR_DISABLED;
 
-uint8_t dutyCycle = 0;
-uint8_t dutyCycleIndex = 0;
+uint8_t dutyCycle = MAX_DUTY_CYCLE * 0.25; // default duty cycle is 25%
 
 // Function Prototypes
 void pwm(uint8_t duty);
 void delayMicros(unsigned long delay);
-// bool debounce(uint8_t pByte, uint8_t pin);
-// SwitchState_t getKeyPress();
 void setMotorSpeed();
 void setMotorDirection();
 void setDutyCycle();
-bool debounceSwitchOne();
-bool debounceSwitchTwo();
 
-// Object Instantiations
+// Switch debouncers
 Debouncer switch1;
 Debouncer switch2;
 
 void setup()
 {
-    // Set Switch 1, 2 as inputs
-    // DDRC &= ~((1 << SWITCH_1_PIN) | (1 << SWITCH_2_PIN)); // 0b00010000 | 0b00001000 = 0b00011000
-
-    switch1.begin(SWITCH_1_PIN);
-    switch2.begin(SWITCH_2_PIN);
+    switch1.begin(SWITCH_1_PIN); // initialize switch 1
+    switch2.begin(SWITCH_2_PIN); // initialize switch 2
 
     // Set LED 1, 2, 3, 4 as outputs
     DDRC |= (1 << LED_1_PIN) | (1 << LED_2_PIN) | (1 << LED_3_PIN) | (1 << LED_4_PIN); // 0b00000001 | 0b00000010 | 0b00000100 | 0b00001000 = 0b00001111
@@ -171,35 +154,32 @@ void setup()
     PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN)); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100: ~0b10010100 = 0b01101011
 
     // set initial state of motor to off
-    PORTB &= ~(1 << ENABLE_PIN);
+    PORTB &= ~(1 << ENABLE_PIN); // 0b00001000
 
     // set initial motor direction to off
     PORTD &= ~((1 << RGB_RED_PIN) | (1 << RGB_GREEN_PIN) | (1 << RGB_BLUE_PIN)); // 0b00000100 | 0b00010000 | 0b10000000 = 0b10010100: ~0b10010100 = 0b01101011
 
     // set initial state of LED 1 to on
     PORTC |= (1 << LED_1_PIN); // 0b00000001 = 0b00000001
-
-    Serial.begin(9600);
 }
 
 void loop()
 {
-    // if (debounceSwitchOne())
+    // switch 1: motor direction
     if (switch1.debounce())
     {
-        Serial.println("Switch 1 Pressed");
         // motor direction: forward -> off -> reverse -> off -> forward -> off
         setMotorDirection();
     }
 
-    // if (debounceSwitchTwo())
+    // switch 2: motor speed
     if (switch2.debounce())
     {
-        Serial.println("Switch 2 Pressed");
         // motor speed: 25% -> 50% -> 75% -> 100%
         setMotorSpeed();
     }
 
+    // PWM
     switch (motorDirection)
     {
     case MOTOR_FORWARD: // intentional fall-through
@@ -207,18 +187,20 @@ void loop()
         PORTB |= (1 << ENABLE_PIN);
         delayMicros(dutyCycle);
         PORTB &= ~(1 << ENABLE_PIN);
-        delayMicros(4000 - dutyCycle);
         break;
     case MOTOR_OFF:
         PORTB &= ~(1 << ENABLE_PIN);
-        delayMicros(4000);
         break;
     default:
         break;
     }
 }
 
-// delay function using micros()
+/**
+ * @brief custom delay function in microseconds
+ * 
+ * @param delay 
+ */
 void delayMicros(unsigned long delay)
 {
     volatile unsigned long start = micros();
@@ -228,30 +210,10 @@ void delayMicros(unsigned long delay)
     }
 }
 
-// void enableMotor()
-// {
-//     // set enable pin to high
-//     PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
-// }
-
-// function for motor control using L293D H-Bridge and PWM to run motor with 4mS frame time
-// void pwm(uint8_t duty)
-// {
-//     // set enable pin to high
-//     PORTB |= (1 << ENABLE_PIN); // 0b00001000 = 0b00001000
-
-//     // set input pins to high
-
-//     // delay for duty cycle
-//     delayMicros(duty);
-
-//     // set input pins to low
-//     PORTB &= ~((1 << INPUT_1_PIN) | (1 << INPUT_2_PIN)); // 0b00000010 | 0b00000001 = 0b00000011: ~0b00000011 = 0b11111100
-
-//     // delay for remaining frame time
-//     delayMicros(4000 - duty);
-// }
-
+/**
+ * @brief Set the Motor Speed. This function cycles through the motor speed settings and sets the yellow LED's accordingly
+ * 
+ */
 void setMotorSpeed()
 {
     switch (motorSpeed)
@@ -287,12 +249,13 @@ void setMotorSpeed()
         break;
     }
 
-    Serial.print("Motor Speed: ");
-    Serial.println(motorSpeed);
-
-    setDutyCycle();
+    setDutyCycle(); // call function to set duty cycle
 }
 
+/**
+ * @brief Set the Motor Direction. This function cycles through the motor direction settings and sets the RGB LED accordingly
+ * 
+ */
 void setMotorDirection()
 {
     switch (motorDirection)
@@ -330,11 +293,12 @@ void setMotorDirection()
     default:
         break;
     }
-
-    Serial.print("Motor Direction: ");
-    Serial.println(motorDirection);
 }
 
+/**
+ * @brief Set the Duty Cycle. This function sets the duty cycle based on the motor speed setting
+ * 
+ */
 void setDutyCycle()
 {
     switch (motorSpeed)
@@ -358,7 +322,4 @@ void setDutyCycle()
     default:
         break;
     }
-
-    Serial.print("Duty Cycle: ");
-    Serial.println(dutyCycle);
 }
