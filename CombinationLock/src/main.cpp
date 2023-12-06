@@ -90,6 +90,12 @@ Row 3: 6
 Row 4: 4
 */
 const int ROW_PINS[ROWS] = {0, 7, 6, 4}; // map to rows 0-3 (respectively)
+/*
+Col 1: 5
+Col 2: 3
+Col 3: 2
+Col 4: 1
+*/
 const int COL_PINS[COLS] = {5, 3, 2, 1}; // map to cols 0-3 (respectively)
 // keypad map
 const char KEYS[ROWS][COLS] = {
@@ -126,12 +132,12 @@ enum State
 {
     OPEN,
     CLOSED,
-    // ENTER_CODE, 
-    ENTER_CODE_OPEN,
-    ENTER_CODE_CLOSED,
-    // INVALID_CODE,
-    INVALID_CODE_OPEN,
-    INVALID_CODE_CLOSED,
+    // ENTER_CODE,
+    // ENTER_CODE_OPEN,
+    // ENTER_CODE_CLOSED,
+    INVALID_CODE,
+    // INVALID_CODE_OPEN,
+    // INVALID_CODE_CLOSED,
     RESET_CODE,
 };
 
@@ -142,6 +148,8 @@ void controlServo(bool open);
 void delayMicros(TickType us);
 char getKeyPress();
 char getRawKeyPress();
+bool checkCode(char *code, int codeLen);
+State safeControl(char key, State state);
 
 void setup()
 {
@@ -172,11 +180,11 @@ void setup()
         }
     }
 
-    // configure rows as outputs to start
+    // configure rows as inputs to start
     for (int i = 0; i < ROWS; i++)
     {
-        DDRD |= (1 << ROW_PINS[i]);  // set to output
-        PORTD |= (1 << ROW_PINS[i]); // set to high
+        DDRD &= ~(1 << ROW_PINS[i]);  // set to input
+        // PORTD |= (1 << ROW_PINS[i]); // set to high
     }
 
     // set columns as input_pullup
@@ -190,177 +198,198 @@ void setup()
 
     // set servo pin to output
     DDRB |= (1 << PB1);
-    // move servo to closed position
+    // ensure servo is in closed position
     controlServo(false);
 }
 
 void loop()
 {
-    static int codeIndex = 0;
+    // static int codeIndex = 0;
     // get key press
     char key = getKeyPress();
-    
+
+    // state = safeControl(key, state);
+
+    if (key == '\0')
+    {
+        // Turn LED ON
+        PORTB |= (1 << PB5);
+    }
+    else
+    {
+        // Turn LED OFF
+        PORTB &= ~(1 << PB5);
+    }
+
+    // switch (state)
+    // {
+    // case OPEN:
+    //     // check for key press
+    //     if (key != '\0')
+    //     {
+    //         // check for valid key press
+    //         if (key == '#')
+    //         {
+    //             if (checkCode((char *)CodeArray, codeIndex))
+    //             {
+    //                 // close safe and set state to CLOSED
+    //                 controlServo(false);
+    //                 state = CLOSED;
+    //             }
+    //             else
+    //             {
+    //                 // set state to INVALID_CODE
+    //                 state = INVALID_CODE;
+    //             }
+    //         }
+    //         else
+    //         {
+    //             // store code in Code Array
+    //             CodeArray[codeIndex++] = key;
+    //         }
+    //     }
+    //     break;
+    // case CLOSED:
+    //     // check for key press
+    //     if (key != '\0')
+    //     {
+    //         // check for valid key press
+    //         if (key == '*')
+    //         {
+    //             // check code
+    //             if (checkCode((char *)CodeArray, codeIndex))
+    //             {
+    //                 // open safe
+    //                 controlServo(true);
+    //                 // set state to OPEN
+    //                 state = OPEN;
+    //             }
+    //             else
+    //             {
+    //                 // set state to INVALID_CODE
+    //                 state = INVALID_CODE;                // set state to ENTER_CODE_CLOSED
+    //             }
+    //         }
+    //         else
+    //         {
+    //             // store code in Code Array
+    //             if (codeIndex < CodeLength)
+    //             {
+    //                 CodeArray[codeIndex++] = key; // add key to code array
+    //             }
+    //             else
+    //             {
+    //                 // set state to INVALID_CODE
+    //                 state = INVALID_CODE;
+    //             }
+    //         }
+    //     }
+    //     break;
+    // case INVALID_CODE:
+    //     // flash LED 5 times
+    //     for (int i = 0; i < 5; i++)
+    //     {
+    //         PORTB |= (1 << PB5);  // set LED to HIGH
+    //         delayMicros(500000);  // 500 ms
+    //         PORTB &= ~(1 << PB5); // set LED to LOW
+    //         delayMicros(500000);  // 500 ms
+    //     }
+    //     // clear code array
+    //     for (int i = 0; i < CodeLength; i++)
+    //     {
+    //         CodeArray[i] = '\0';
+    //     }
+    //     // reset code index
+    //     codeIndex = 0;
+    //     // set state to CLOSED
+    //     state = CLOSED;
+    //     break;
+    // case RESET_CODE:
+    //     break;
+
+    // default:
+    //     break;
+    // }
+}
+
+State safeControl(char key, State state)
+{
+    static int codeIndex = 0;
+
+    State newState = state;
+
     switch (state)
     {
     case OPEN:
-        // set LED to HIGH
-        PORTB |= (1 << PB5);
         // check for key press
         if (key != '\0')
         {
             // check for valid key press
             if (key == '#')
             {
-                // close safe
-                controlServo(false);
-                // set state to CLOSED
-                state = CLOSED;
+                if (checkCode((char *)CodeArray, codeIndex))
+                {
+                    // close safe and set state to CLOSED
+                    controlServo(false);
+                    newState = CLOSED;
+                }
+                else
+                {
+                    // set state to INVALID_CODE
+                    newState = INVALID_CODE;
+                }
             }
             else
             {
-                // set state to ENTER_CODE_OPEN
-                state = ENTER_CODE_OPEN;
+                // store code in Code Array
+                CodeArray[codeIndex++] = key;
             }
         }
         break;
     case CLOSED:
-        // set LED to LOW
-        PORTB &= ~(1 << PB5);
         // check for key press
         if (key != '\0')
         {
             // check for valid key press
             if (key == '*')
             {
-                // open safe
-                controlServo(true);
-                // set state to OPEN
-                state = OPEN;
-            }
-            else
-            {
-                // set state to ENTER_CODE_CLOSED
-                state = ENTER_CODE_CLOSED;
-            }
-        }
-        break;
-    case ENTER_CODE_OPEN:
-        // check for key press
-        if (key != '\0')
-        {
-            // check for valid key press
-            if (key == '#')
-            {
-                // close safe
-                controlServo(false);
-                // set state to CLOSED
-                state = CLOSED;
-            }
-            else if (key == '*')
-            {
-                // reset code
-                codeIndex = 0;
-                // set state to RESET_CODE
-                state = RESET_CODE;
-            }
-            else
-            {
-                // check if key is valid
-                if ((key >= '0' && key <= '9') || (key >= 'A' && key <= 'D'))
+                // check code
+                if (checkCode((char *)CodeArray, codeIndex))
                 {
-                    // add key to code array
-                    CodeArray[codeIndex] = key;
-                    // increment code index
-                    codeIndex++;
-                    // check if code is complete
-                    if (codeIndex == CodeLength)
-                    {
-                        // check if code is valid
-                        bool valid = true;
-                        for (int i = 0; i < CodeLength; i++)
-                        {
-                            if (CodeArray[i] != StoredCode[i])
-                            {
-                                valid = false;
-                            }
-                        }
-                        // check if code is valid
-                        if (valid)
-                        {
-                            // open safe
-                            controlServo(false);
-                            // set state to OPEN
-                            state = CLOSED;
-                        }
-                        else
-                        {
-                            // set state to INVALID_CODE_OPEN
-                            state = INVALID_CODE_OPEN;
-                        }
-                    }
+                    // open safe
+                    controlServo(true);
+                    // set state to OPEN
+                    newState = OPEN;
+                }
+                else
+                {
+                    // set state to INVALID_CODE
+                    newState = INVALID_CODE; // set state to ENTER_CODE_CLOSED
+                }
+            }
+            else
+            {
+                // store code in Code Array
+                if (codeIndex < CodeLength)
+                {
+                    CodeArray[codeIndex++] = key; // add key to code array
+                }
+                else
+                {
+                    // set state to INVALID_CODE
+                    newState = INVALID_CODE;
                 }
             }
         }
         break;
-    case ENTER_CODE_CLOSED:
-        // check for key press
-        if (key != '\0')
-        {
-            // check for valid key press
-            if (key == '*')
-            {
-                // reset code
-                codeIndex = 0;
-                // set state to RESET_CODE
-                state = RESET_CODE;
-            }
-            else
-            {
-                // check if key is valid
-                if ((key >= '0' && key <= '9') || (key >= 'A' && key <= 'D'))
-                {
-                    // add key to code array
-                    CodeArray[codeIndex] = key;
-                    // increment code index
-                    codeIndex++;
-                    // check if code is complete
-                    if (codeIndex == CodeLength)
-                    {
-                        // check if code is valid
-                        bool valid = true;
-                        for (int i = 0; i < CodeLength; i++)
-                        {
-                            if (CodeArray[i] != StoredCode[i])
-                            {
-                                valid = false;
-                            }
-                        }
-                        // check if code is valid
-                        if (valid)
-                        {
-                            // open safe
-                            controlServo(true);
-                            // set state to OPEN
-                            state = OPEN;
-                        }
-                        else
-                        {
-                            // set state to INVALID_CODE_CLOSED
-                            state = INVALID_CODE_CLOSED;
-                        }
-                    }
-                }
-            }
-        }
-        break;
-    case INVALID_CODE_OPEN:
+    case INVALID_CODE:
         // flash LED 5 times
         for (int i = 0; i < 5; i++)
         {
-            PORTB |= (1 << PB5); // set LED to HIGH
-            delayMicros(500000); // 500 ms
+            PORTB |= (1 << PB5);  // set LED to HIGH
+            delayMicros(500000);  // 500 ms
             PORTB &= ~(1 << PB5); // set LED to LOW
-            delayMicros(500000); // 500 ms
+            delayMicros(500000);  // 500 ms
         }
         // clear code array
         for (int i = 0; i < CodeLength; i++)
@@ -369,31 +398,12 @@ void loop()
         }
         // reset code index
         codeIndex = 0;
-        // set state to ENTER_CODE_OPEN
-        state = ENTER_CODE_OPEN;
-        break;
-    case INVALID_CODE_CLOSED:
-        // flash LED 5 times
-        for (int i = 0; i < 5; i++)
-        {
-            PORTB |= (1 << PB5); // set LED to HIGH
-            delayMicros(500000); // 500 ms
-            PORTB &= ~(1 << PB5); // set LED to LOW
-            delayMicros(500000); // 500 ms
-        }
-        // clear code array
-        for (int i = 0; i < CodeLength; i++)
-        {
-            CodeArray[i] = '\0';
-        }
-        // reset code index
-        codeIndex = 0;
-        // set state to ENTER_CODE_CLOSED
-        state = ENTER_CODE_CLOSED;
+        // set state to CLOSED
+        newState = CLOSED;
         break;
     case RESET_CODE:
         break;
-    
+
     default:
         break;
     }
@@ -435,7 +445,6 @@ void delayMicros(TickType us)
 //   read column inputs (columns should be configured as INPUT_PULLUP)
 //   set ROWn to 1 (forces high state w/o waiting for slow rise time from pullups)
 //   make all ROWs inputs again (previously setting ROWn to 1 will configure the pin as INPUT_PULLUP)
-
 char getKeyPress()
 {
     // get key press
@@ -465,8 +474,6 @@ char getKeyPress()
 // get key press helper
 char getRawKeyPress()
 {
-    char key = '\0'; // default key value
-
     // scan rows for key press
     for (int i = 0; i < ROWS; i++)
     {
@@ -480,11 +487,25 @@ char getRawKeyPress()
             byte colState = (PIND & (1 << COL_PINS[j])) >> COL_PINS[j]; // get column state
             if (colState == 0)
             {
-                key = KEYS[i][j];
+                return KEYS[i][j]; // return key press
             }
         }
         // set ROWn to 1 (forces high state w/o waiting for slow rise time from pullups)
         PORTD |= (1 << ROW_PINS[i]);
     }
-    return key;
+    // return null character if no key is pressed;
+    return '\0';
+}
+
+bool checkCode(char *code, int codeLen)
+{
+    if (codeLen == CodeLength)
+    {
+        if (strcmp(code, (const char *)StoredCode))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
