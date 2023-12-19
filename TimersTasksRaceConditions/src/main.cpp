@@ -1,39 +1,127 @@
+/**
+ * @file main.cpp
+ * @author Kevin Wing (wing5640@vandals.uidaho.edu)
+ * @brief Timer, Tasks, Race Conditions, and Interrupts
+ */
 #include <Arduino.h>
 
 // Define pins and masks
-const int dpPin = 10; // Adjust this pin number based on your hardware setup
-const byte dpMask = 1 << dpPin;
+const uint8_t SEGMENT_DP_PIN = PD7; // Assign the appropriate pin number
+const uint8_t SW3_PIN = PB3;        // Assign the appropriate pin number
+const uint8_t CC1 = PB0;
+const uint8_t CC2 = PB1;
 
-// Variable to store the current digit value
-volatile byte digit = 0;
+// 7-segment hexfont
+const uint8_t hexfont[] = {
+    0b00111111, // 0
+    0b00000110, // 1
+    0b01011011, // 2
+    0b01001111, // 3
+    0b01100110, // 4
+    0b01101101, // 5
+    0b01111101, // 6
+    0b00000111, // 7
+    0b01111111, // 8
+    0b01101111, // 9
+    0b01110111, // A
+    0b01111100, // b
+    0b00111001, // C
+    0b01011110, // d
+    0b01111001, // E
+    0b01110001  // F
+};
 
-// ISR for Timer1
+// Function prototypes
+void configureTimer1();
+void dpAtomicToggle();
+void dpToggle();
+byte readSw3();
+
+// Global variables
+volatile uint8_t counter = 0;
+
+// ISR for Timer 1
 ISR(TIMER1_COMPA_vect) {
-  digit = (digit + 1) & 0x0F; // Increment the digit and wrap around after 'F'
-  // Add code here to display the digit on the 7-segment display
-  
+    // turn off cc2
+    PORTB &= ~(1 << CC1);
+
+    // Increment the 7-segment display on CC2
+    PORTB &= ~(1 << CC2); // Disable CC2
+    PORTD = hexfont[counter & 0x0F];
+    PORTB |= (1 << CC2);  // Enable CC2
+
+    // turn on cc2
+    PORTB |= (1 << CC1);
+
+    // Increment the 7-segment display on CC1
+    counter = (counter + 1) & 0x0F; // Increment and wrap around after 0xF
 }
 
-int main() {
-  // Initial setup for Timer1 and DP pin
-  // ... (Timer and pin initialization code goes here)
 
-  while(1) {
-    if (readSw3() == 0) {
-      dpAtomicToggle(); // Atomically toggle DP
-    } else {
-      PORTD ^= dpMask; // Non-atomically toggle DP
+int main()
+{
+    // Initialize ports and pins
+    DDRD = 0b11111111; // Set all PORTD pins as outputs
+    DDRB |= (1 << CC1) | (1 << CC2);
+    DDRB &= ~(1 << SW3_PIN); // Set SW3 pin as input
+    configureTimer1();
+
+    while (1)
+    {
+        if (readSw3() == 0)
+        {
+            dpAtomicToggle(); // Atomically toggle DP
+        }
+        else
+        {
+            dpToggle(); // Non-atomically toggle DP
+        }
     }
-  }
+
+    return 0;
 }
 
-// Function to read the state of SW3
-bool readSw3() {
-  // Add code here to read the state of SW3
-  return false; // Placeholder
+void configureTimer1()
+{
+    // Disable interrupts
+    cli();
+
+    // Set Timer1 in CTC (Clear Timer on Compare Match) mode
+    TCCR1A = 0;             // Clear control register A
+    TCCR1B = 0;             // Clear control register B
+    TCCR1B |= (1 << WGM12); // Configure for CTC mode
+
+    // Set TOP value for Timer1 to 20832: ~1ms
+    OCR1A = 20832;
+
+    // Enable Timer1 compare interrupt
+    TIMSK1 |= (1 << OCIE1A);
+
+    // Set prescaler to 256 and start the timer
+    TCCR1B |= (1 << CS12);
+
+    // Re-enable interrupts
+    sei();
 }
 
-// Function to atomically toggle DP
-void dpAtomicToggle() {
-  // Add atomic toggle code here
+void dpAtomicToggle()
+{
+    // writing a 1 to PINx toggles the pin state atomically
+    PIND |= (1 << SEGMENT_DP_PIN); // atomically toggle DP pin
+}
+
+void dpToggle()
+{
+    PORTB |= (1 << CC1);
+    // Toggle DP pin
+    PORTD ^= (1 << SEGMENT_DP_PIN); // Toggle DP pin
+
+    // turn off cc2
+    PORTB &= ~(1 << CC1);
+}
+
+byte readSw3()
+{
+    // Read SW3 state and return it
+    return (PIND & (1 << SW3_PIN));
 }
